@@ -27,6 +27,13 @@ def parse_args():
         action="store_true",
         help="Show line by line diffs of files with changes",
     )
+    parser.add_argument(
+        "-i",
+        "--ignore",
+        nargs="*",
+        default=[],
+        help="Additional file names or directories to ignore",
+    )
 
     return parser.parse_args()
 
@@ -47,8 +54,10 @@ def compute_dir_hash(directory):
     """Given file path, compute the hash of every file recursively"""
 
     hasher = hashlib.sha256()
-    ignore_dirs = {".git"}
-    ignore_files = {".gitignore", "lazy-lock.json"}
+    args = parse_args()
+    user_ignores = set(args.ignore)
+    ignore_dirs = {".git"} | user_ignores
+    ignore_files = {".gitignore", "lazy-lock.json"} | user_ignores
 
     for file in sorted(directory.rglob("*")):
         if any(part in ignore_dirs for part in file.parts):
@@ -70,8 +79,10 @@ def compute_dir_hash(directory):
 def file_by_file_hash(archive, active, diff=False):
     """Compute file by file hash for granular comparison"""
 
-    ignore_dirs = {".git"}
-    ignore_files = {".gitignore", "lazy-lock.json"}
+    args = parse_args()
+    user_ignores = set(args.ignore)
+    ignore_dirs = {".git"} | user_ignores
+    ignore_files = {".gitignore", "lazy-lock.json"} | user_ignores
 
     archive_files = {}
     for file in sorted(archive.rglob("*")):
