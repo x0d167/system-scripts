@@ -124,6 +124,30 @@ def get_mem_usage():
 #                          NETWORK                             #
 ################################################################
 
+
+def get_active_ip_interfaces():
+    """Get active interfaces with ip -brief a"""
+    result = subprocess.run(["ip", "-brief", "a"], capture_output=True, text=True)
+    lines = result.stdout.strip().splitlines()
+    ip_intfc = {}
+
+    for line in lines:
+        entry = line.split()
+        if len(entry) >= 3:
+            interface = entry[0]
+            status = entry[1]
+            if interface == "lo":
+                continue
+            for field in entry[2:]:
+                if ":" not in field:  # likely an IPv4
+                    ipv4 = field
+                    ip_intfc[interface] = {"ip": ipv4, "status": status}
+                    break
+
+    print(ip_intfc)
+    return ip_intfc
+
+
 ################################################################
 #                          SECURITY                            #
 ################################################################
@@ -180,6 +204,7 @@ def main():
     render_system_summary(system_summary)
     get_disk_usage()
     get_mem_usage()
+    get_active_ip_interfaces()
 
 
 if __name__ == "__main__":
