@@ -31,7 +31,7 @@
 
 🔒 Security / Auth
 
-    UFW status
+    Firewalld status
 
     Fail2ban status
 

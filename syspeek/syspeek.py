@@ -96,7 +96,6 @@ def get_disk_usage():
             used = stats[2]
             free = stats[3]
             disk[drive] = f"{used} | {free} (of {total_size})"
-    print(disk)
     return disk
 
 
@@ -116,7 +115,6 @@ def get_mem_usage():
 
             mem[mem_type] = f"{used} | {free} (of {total})"
 
-    print(mem)
     return mem
 
 
@@ -144,8 +142,73 @@ def get_active_ip_interfaces():
                     ip_intfc[interface] = {"ip": ipv4, "status": status}
                     break
 
-    print(ip_intfc)
     return ip_intfc
+
+
+def confirm_default_route():
+    """Check ip r to confirm internet access is active"""
+    result = subprocess.run(["ip", "r"], capture_output=True, text=True)
+    lines = result.stdout.strip().splitlines()
+    default_route = {}
+
+    for line in lines:
+        entry = line.split()
+        if entry and entry[0] == "default":
+            device = entry[4]
+            gateway = entry[2]
+            default_route[device] = {"gateway": gateway}
+
+    # print(default_route)
+    return {"default routes": default_route}
+
+
+def get_dns_status():
+    """Retrieve DNS status with resolvectl"""
+    result = subprocess.run(["resolvectl", "status"], capture_output=True, text=True)
+    lines = result.stdout.strip().splitlines()
+    sections = {}
+    current_section = None
+    dns_status = {}
+
+    for line in lines:
+        if line == "Global":
+            current_section = "Global"
+            sections[current_section] = []
+        elif line.startswith("Link"):
+            interface = line.split("(")[1].split(")")[0]
+            current_section = interface
+            sections[current_section] = []
+        elif current_section:
+            sections[current_section].append(line.strip())
+
+    for key, details in sections.items():
+        if "Default Route: yes" in details:
+            interface = key
+            current_server = None
+            dns_servers = []
+
+            for line in details:
+                if line.startswith("Current DNS Server:"):
+                    current_server = line.split(":", 1)[1].strip()
+                elif line.startswith("DNS Servers:"):
+                    dns_servers = line.split(":", 1)[1].strip().split()
+
+            dns_status = {
+                "dns": {
+                    "status": True,
+                    "current_server": current_server,
+                    "all_servers": dns_servers,
+                    "interface": interface,
+                }
+            }
+            break
+
+    if not dns_status:
+        dns_status = {
+            "dns": {"status": False, "reason": "No active DNS interface found"}
+        }
+
+    return dns_status
 
 
 ################################################################
@@ -205,6 +268,8 @@ def main():
     get_disk_usage()
     get_mem_usage()
     get_active_ip_interfaces()
+    confirm_default_route()
+    get_dns_status()
 
 
 if __name__ == "__main__":
