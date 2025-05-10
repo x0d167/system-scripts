@@ -1,7 +1,10 @@
 import subprocess
 from rich.console import Console
 from rich.table import Table
-from rich.pretty import pprint
+from rich.panel import Panel
+from rich.layout import Layout
+from rich.text import Text
+from rich import box
 
 
 ################################################################
@@ -118,7 +121,12 @@ def get_mem_usage():
 
     return mem
 
-
+def get_disk_mem_summary():
+    """summarize the disk and memory details"""
+    return {
+            "Disk": get_disk_usage(),
+            "Memory": get_mem_usage(),
+    }
 ################################################################
 #                          NETWORK                             #
 ################################################################
@@ -251,47 +259,151 @@ def get_network_summary():
 #                          SECURITY                            #
 ################################################################
 
+def check_firewall_status():
+    """Check Firewalld status."""
+    result = subprocess.run(["systemctl", "status", "firewalld"], capture_output=True, text=True)
+    lines = result.stdout.strip().splitlines()
+    firewalld_status = {}
 
-################################################################
-#                       CONFIG CHECKS                          #
-################################################################
+    for line in lines:
+        if line.strip().startswith("Loaded"):
+            if "firewalld.service; enabled;" in line:
+                systemctl_status = {"Firewall enabled": "True"}
+                firewalld_status["Firewalld"] = systemctl_status
+            else:
+                systemctl_status = {"Firewall enabled": "False"}
+                firewalld_status["Firewalld"] = systemctl_status
+        if line.strip().startswith("Active"):
+            if "active (running)" in line:
+                firewall_active_stat = {"Firewall running": "True"}
+                firewalld_status["Firewalld"].update(firewall_active_stat)
+            else:
+                firewall_active_stat = {"Firewall running": "False"}
+                firewalld_status["Firewalld"].update(firewall_active_stat)
 
-
-################################################################
-#                  ACCOUNTS & CONNECTIVITY                     #
-################################################################
+    return firewalld_status
 
 
 ################################################################
 #                   RENDER SYSTEM SUMMARY                      #
 ################################################################
-
-
-def render_system_summary(summary: dict):
-    """Use rich to present the system summary. This was just a trial of rich. Will return to it."""
-    table = Table(title="System Overview")
-
-    table.add_column("Metric", style="cyan", no_wrap=True)
-    table.add_column("Value", style="magenta")
-
-    for key, value in summary.items():
-        row_style = None
-
-        if "Load Avg" in key:
-            try:
-                percent_str = value.split("(")[1].split("%")[0]
-                load_percent = float(percent_str)
-                if load_percent >= 80:
-                    row_style = "red"
-            except (IndexError, ValueError):
-                pass
-
-        table.add_row(key, value, style=row_style)
-
+def render_dashboard(system, network, firewall, disk_mem):
     console = Console()
-    console.print(table)
+    layout = Layout()
+
+    # Top-level layout split into header + body
+    layout.split(Layout(name="header", size=3), Layout(name="body", ratio=1))
+
+    # Body is split into 2 rows: top(sys+net), bottom (security+storage)
+    layout["body"].split(Layout(name="top", ratio=1), Layout(name="bottom", ratio=1))
+
+    # Split top row horizontally into system + network
+    layout["top"].split_row(Layout(name="system"), Layout(name="network"))
+
+    # Split bottom row into security + resources (or future)
+    layout["bottom"].split_row(Layout(name="security"), Layout(name="placeholder"))
+
+    # HEADER
+    layout["header"].update(Text("🖥️  syspeek: System Status Overview", style="bold cyan"))
+
+    # SYSTEM PANEL
+    layout["system"].update(render_system_panel(system, disk_mem))
+
+    # NETWORK PANEL
+    layout["network"].update(render_network_panel(network))
+
+    # SECURITY PANEL
+    layout["security"].update(render_security_panel(firewall))
+
+    # Placeholder for future use
+    layout["placeholder"].update(Panel(Text("Coming soon...", justify="center"), title="💾 Resources"))
+
+    console.print(layout)
+
+def render_network_panel(network):
+    table = Table.grid(padding=(0, 1))
+    interfaces = network.get("interfaces", {})
+    for name, data in interfaces.items():
+        ip = data.get("ip", "—")
+        status = data.get("status", "—")
+        symbol = "🟢" if "UP" in status.upper() or name == "proton0" else "🔴"
+        table.add_row(f"{symbol} [bold]{name}[/]", f"{ip} ({status})")
+
+    routes = network.get("default_routes", {})
+    for iface, info in routes.items():
+        table.add_row(f"🌐 Route ({iface})", f"Gateway: {info.get('gateway', '—')}")
+
+    dns = network.get("dns", {})
+    if dns.get("status"):
+        current = dns.get("current_server", "—")
+        all_servers = ", ".join(dns.get("all_servers", []))
+        table.add_row("🧭 DNS", f"{current} (via {dns.get('interface', '—')})")
+        if len(dns.get("all_servers", [])) > 1:
+            table.add_row("", f"Alt: {all_servers}")
+    else:
+        table.add_row("🧭 DNS", "[red]❌ No DNS detected[/]")
+
+    vpn = network.get("vpn", {})
+    if vpn.get("status"):
+        table.add_row("🔐 VPN", f"[green]Active[/] via {vpn.get('interface')} ({vpn.get('ip')})")
+    else:
+        table.add_row("🔐 VPN", "[yellow]Not detected[/]")
+
+    return Panel(table, title="🌐 Network", box=box.ROUNDED)
+
+def render_system_panel(system, disk_mem):
+    table = Table.grid(padding=(0, 2))
+    
+    # 🧠 Basic System Info
+    table.add_row("💻 [bold]OS[/]", system.get("OS", "—"))
+    table.add_row("🧬 [bold]Kernel[/]", system.get("Kernel", "—"))
+    table.add_row("🕒 [bold]Uptime[/]", system.get("Uptime", "—"))
+    table.add_row("📛 [bold]Hostname[/]", system.get("hostname", "—"))
+
+    # 🧮 Load Average
+    load = system.get("Load Avg (1m, 5m, 15m)", "—")
+    try:
+        percent = float(load.split("(")[1].split("%")[0])
+        style = "green" if percent < 50 else "yellow" if percent < 80 else "red"
+        load_display = f"[{style}]{load}[/{style}]"
+    except Exception:
+        load_display = load
+    table.add_row("📊 [bold]Load Avg[/]", load_display)
+
+    # 💾 Disk Usage
+    table.add_row("", "")  # spacer row
+    disk = disk_mem.get("Disk", {})
+    for label, usage in disk.items():
+        table.add_row(f"💽 [bold]{label}[/]", usage)
+
+    # 🧠 Memory Usage
+    mem = disk_mem.get("Memory", {})
+    for label, usage in mem.items():
+        emoji = "🧠" if label == "Mem" else "🔃"
+        table.add_row(f"{emoji} [bold]{label}[/]", usage)
+
+    return Panel(table, title="🧠 System", box=box.ROUNDED)
 
 
+def render_security_panel(firewall):
+    from rich.align import Align
+    from rich.panel import Panel
+    from rich.text import Text
+
+    status = firewall.get("Firewalld", {})
+    enabled = status.get("Firewall enabled", "False") == "True"
+    running = status.get("Firewall running", "False") == "True"
+
+    if enabled and running:
+        message = Text("✅ Firewall is ENABLED and ACTIVE", style="bold white on green", justify="center")
+    elif not enabled and not running:
+        message = Text("❌ Firewall is DISABLED and INACTIVE", style="bold white on red", justify="center")
+    elif not enabled:
+        message = Text("⚠️ Firewall is INACTIVE (not enabled)", style="bold black on yellow", justify="center")
+    else:
+        message = Text("⚠️ Firewall is ENABLED but NOT RUNNING", style="bold black on yellow", justify="center")
+
+    return Panel(Align.center(message, vertical="middle"), title="🔐 Security", height=5, padding=1)
 ################################################################
 #                      MAIN FUNCTION                           #
 ################################################################
@@ -300,9 +412,10 @@ def render_system_summary(summary: dict):
 def main():
     system_summary = get_system_summary()
     network_summary = get_network_summary()
-    pprint(system_summary)
-    pprint(network_summary)
+    firewall_summary = check_firewall_status()
+    disk_mem_summary = get_disk_mem_summary()
 
+    render_dashboard(system_summary, network_summary, firewall_summary, disk_mem_summary)
 
 
 if __name__ == "__main__":
