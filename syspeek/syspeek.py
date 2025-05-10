@@ -1,6 +1,7 @@
 import subprocess
 from rich.console import Console
 from rich.table import Table
+from rich.pretty import pprint
 
 
 ################################################################
@@ -210,6 +211,41 @@ def get_dns_status():
 
     return dns_status
 
+def detect_vpn_status():
+    """Basic VPN check using presence of VPN-like interfaces"""
+    interfaces = get_active_ip_interfaces()
+    for iface in interfaces:
+        if any(keyword in iface.lower() for keyword in ["proton", "vpn", "tun", "wg"]):
+            return {
+                "vpn": {
+                    "status": True,
+                    "interface": iface,
+                    "ip": interfaces[iface]["ip"]
+                }
+            }
+
+    return {
+        "vpn": {
+            "status": False,
+            "reason": "No active VPN interface detected"
+        }
+    }
+
+def get_network_summary():
+    """Gather all network-related information into a structured summary."""
+    interfaces = get_active_ip_interfaces()
+    default_routes = confirm_default_route()
+    dns = get_dns_status()
+    vpn = detect_vpn_status()
+
+    summary = {
+        "interfaces": interfaces,
+        "default_routes": default_routes.get("default routes", {}),
+        "dns": dns.get("dns", {}),
+        "vpn": vpn.get("vpn", {}),
+    }
+
+    return summary
 
 ################################################################
 #                          SECURITY                            #
@@ -232,7 +268,7 @@ def get_dns_status():
 
 
 def render_system_summary(summary: dict):
-    """Use rich to present the system summary"""
+    """Use rich to present the system summary. This was just a trial of rich. Will return to it."""
     table = Table(title="System Overview")
 
     table.add_column("Metric", style="cyan", no_wrap=True)
@@ -263,13 +299,10 @@ def render_system_summary(summary: dict):
 
 def main():
     system_summary = get_system_summary()
+    network_summary = get_network_summary()
+    pprint(system_summary)
+    pprint(network_summary)
 
-    render_system_summary(system_summary)
-    get_disk_usage()
-    get_mem_usage()
-    get_active_ip_interfaces()
-    confirm_default_route()
-    get_dns_status()
 
 
 if __name__ == "__main__":
